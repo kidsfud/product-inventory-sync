@@ -80,6 +80,7 @@ async function updateWooCommerceInventory(shopifyProductId, quantity) {
     console.log(`✅ Stock updated for WooCommerce Product ID ${matchingProduct.id} to ${quantity}`);
   } catch (err) {
     console.error("❌ WooCommerce update failed:", err.response?.data || err.message);
+    console.error(err.toJSON ? err.toJSON() : err); 
   }
 }
 module.exports = { updateWooCommerceInventory };
