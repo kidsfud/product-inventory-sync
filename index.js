@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
+const axios = require("axios");
 const { updateWooCommerceInventory } = require("./woocommerce-api");
 
 const app = express();
