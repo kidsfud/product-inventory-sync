@@ -43,7 +43,47 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
 });
 
 // 🔥woocommerce to shopify order sync
+// ──────────────────────────────────────────────────────────────────
+// 1️⃣ Preload WooCommerce→Shopify mapping into memory
+// ──────────────────────────────────────────────────────────────────
+const wooProductMap = new Map();  // shopify_product_id → { id, stock }
 
+async function loadWooMap() {
+  let page = 1;
+  while (true) {
+    const { data: products } = await axios.get(
+      `${process.env.WOOCOMMERCE_SITE_URL}/wp-json/wc/v3/products`,
+      {
+        params: {
+          consumer_key:    process.env.WOOCOMMERCE_CONSUMER_KEY,
+          consumer_secret: process.env.WOOCOMMERCE_CONSUMER_SECRET,
+          per_page:        100,
+          page,
+          context:         "edit"
+        }
+      }
+    );
+    if (!Array.isArray(products) || products.length === 0) break;
+
+    for (const prod of products) {
+      if (!Array.isArray(prod.meta_data)) continue;
+      const entry = prod.meta_data.find(m => m.key === "shopify_product_id");
+      if (entry) {
+        wooProductMap.set(String(entry.value), {
+          id:    prod.id,
+          stock: parseInt(prod.stock_quantity, 10) || 0
+        });
+      }
+    }
+    page++;
+  }
+  console.log(`✅ Loaded ${wooProductMap.size} products into Woo→Shopify map`);
+}
+
+// Start the server only after loading the map
+loadWooMap().then(() => {
+  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+});
 
 
 // 🚀 Start the server
