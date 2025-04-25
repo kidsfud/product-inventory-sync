@@ -42,6 +42,10 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
   res.status(200).send("OK");
 });
 
+// 🔥woocommerce to shopify order sync
+
+
+
 // 🚀 Start the server
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
