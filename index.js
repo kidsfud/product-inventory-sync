@@ -63,9 +63,14 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
 
   console.log(`🛒 Shopify Product ID: ${shopifyProductId}, New Stock: ${inventory_quantity}`);
 
-  await updateWooCommerceInventory(shopifyProductId, inventory_quantity);
-
-  res.status(200).send("OK");
+  try {
+    // Update WooCommerce inventory
+    await updateWooCommerceInventory(shopifyProductId, inventory_quantity);
+    return res.status(200).send("OK");
+  } catch (err) {
+    console.error("❌ Error updating WooCommerce inventory:", err.message);
+    return res.status(500).send("Internal server error");
+  }
 });
 
 // ✅ WooCommerce → Shopify: Order created webhook
@@ -73,13 +78,20 @@ app.post("/woocommerce/order-created", async (req, res) => {
   const order = req.body;
 
   if (!order || !order.id) {
+    console.error("❌ Invalid order payload", order);
     return res.status(400).send("Invalid order payload");
   }
 
   console.log(`📦 Received WooCommerce Order ID: ${order.id}`);
-  await handleWooOrder(order);
 
-  res.status(200).send("Order received and processed");
+  try {
+    // Reduce Shopify inventory based on WooCommerce order
+    await handleWooOrder(order);
+    return res.status(200).send("Order received and processed");
+  } catch (err) {
+    console.error("❌ Error processing WooCommerce order:", err.message);
+    return res.status(500).send("Internal server error");
+  }
 });
 
 // 🚀 Start the server
