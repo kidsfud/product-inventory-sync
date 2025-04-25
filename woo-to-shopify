@@ -1,0 +1,70 @@
+
+require("dotenv").config();
+const axios = require("axios");
+
+module.exports = async function handleWooOrder(order, wooProductMap) {
+  // Ensure order exists and is structured correctly
+  if (!order || !order.id || !order.line_items) {
+    console.error("❌ Invalid order structure", order);
+    return;
+  }
+
+  // Iterate through each line item (product) in the WooCommerce order
+  for (const item of order.line_items) {
+    const quantity = item.quantity; // The quantity of the product ordered
+    const meta = item.meta_data || [];  // Meta data associated with the item
+
+    // Find the shopify_product_id from WooCommerce metadata
+    const shopifyMeta = meta.find(m => m.key === "shopify_product_id");
+    const shopifyProductId = shopifyMeta ? shopifyMeta.value : null;
+
+    if (!shopifyProductId) {
+      console.warn(`⚠️ No Shopify Product ID found for item: ${item.name}`);
+      continue; // Skip to the next item if no Shopify Product ID
+    }
+
+    try {
+      // Step 1: Fetch the corresponding Shopify product's variant information
+      const variantRes = await axios.get(
+        `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2024-01/products/${shopifyProductId}/variants.json`,
+        {
+          headers: {
+            "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      const variants = variantRes.data.variants;
+      if (!variants || variants.length === 0) {
+        console.error("❌ No variants found for this product.");
+        continue;  // Skip if no variants are found
+      }
+
+      const inventoryItemId = variants[0].inventory_item_id;
+      console.log(`➡️ Found Inventory Item ID: ${inventoryItemId}`);
+
+      // Step 2: Adjust inventory levels in Shopify
+      const adjustEndpoint = `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2024-01/inventory_levels/adjust.json`;
+      const payload = {
+        location_id: process.env.SHOPIFY_LOCATION_ID,  // Your Shopify location ID
+        inventory_item_id: inventoryItemId,
+        available_adjustment: -quantity  // Reduce stock based on order quantity
+      };
+
+      // Make the API call to adjust the inventory
+      await axios.post(adjustEndpoint, payload, {
+        headers: {
+          "X-Shopify-Access-Token": process.env.SHOPIFY_ACCESS_TOKEN,
+          "Content-Type": "application/json"
+        }
+      });
+
+      console.log(`✅ Inventory updated for product ${shopifyProductId} | Adjusted by -${quantity}`);
+    } catch (err) {
+      console.error("❌ Error processing product:", err.response?.data || err.message);
+    }
+  }
+  
+  console.log(`✅ WooCommerce Order Processed: ${order.id}`);
+};
