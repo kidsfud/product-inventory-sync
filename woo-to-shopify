@@ -59,7 +59,7 @@ module.exports = async function handleWooOrder(order, wooProductMap) {
         }
       });
 
-      console.log(`✅ Inventory updated for product ${shopifyProductId} | Adjusted by -${quantity}`);
+      console.log(`✅ Inventory updated for product ${shopifyProductId} | Adjusted  by -${quantity}`);
     } catch (err) {
       console.error("❌ Error processing product:", err.response?.data || err.message);
     }
