@@ -211,6 +211,3 @@ loadWooMap()
     console.error("❌ Failed to load WooCommerce product map:", err.message);
     process.exit(1);
   });
-
-
-  
