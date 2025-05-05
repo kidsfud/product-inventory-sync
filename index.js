@@ -218,58 +218,35 @@
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
-const axios = require("axios");
 const crypto = require("crypto");
+const axios = require("axios");
 const { updateWooCommerceInventory } = require("./woocommerce-api");
 const handleWooOrder = require("./woo-to-shopify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// app.use(bodyParser.json());
+// 🧠 In-memory cache to track last updated stock
+const lastUpdatedStock = new Map();
 
+// 🛡️ Capture raw body for Shopify HMAC validation
 app.use(
   bodyParser.json({
     verify: (req, res, buf) => {
-      req.rawBody = buf;
-    },
+      req.rawBody = buf; // Raw buffer for HMAC
+    }
   })
 );
 
-
-// 🧠 In-memory caches
-const lastUpdatedStock = new Map(); // shopifyProductId → stock
-const webhookCache = new Map();     // productId-stock → timestamp
-
-// ✅ Verify Shopify Webhook Signature
-// function verifyShopifyWebhook(req) {
-//   const hmacHeader = req.get("X-Shopify-Hmac-SHA256");
-//   const body = JSON.stringify(req.body);
-//   const digest = crypto
-//     .createHmac("sha256", process.env.SHOPIFY_WEBHOOK_SECRET)
-//     .update(body, "utf8")
-//     .digest("base64");
-//   return digest === hmacHeader;
-// }
-
+// 🛡️ HMAC verification function
 function verifyShopifyWebhook(req) {
   const hmacHeader = req.get("X-Shopify-Hmac-SHA256");
-  const body = req.rawBody; // <--- use raw body buffer
   const digest = crypto
     .createHmac("sha256", process.env.SHOPIFY_WEBHOOK_SECRET)
-    .update(body, "utf8")
+    .update(req.rawBody)
     .digest("base64");
 
   return digest === hmacHeader;
-}
-
-// ⏱️ Debounce duplicate updates (within 5s)
-function isDuplicateWebhook(shopifyProductId, inventory_quantity, timestamp) {
-  const key = `${shopifyProductId}-${inventory_quantity}`;
-  const last = webhookCache.get(key);
-  if (last && timestamp - last < 5000) return true;
-  webhookCache.set(key, timestamp);
-  return false;
 }
 
 // 🔥 Shopify Product Update Webhook Handler
@@ -291,19 +268,16 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
     return res.status(400).send("Missing inventory quantity");
   }
 
-  const now = Date.now();
-  if (isDuplicateWebhook(shopifyProductId, inventory_quantity, now)) {
-    console.log(`⏱️ Skipping duplicate webhook for ${shopifyProductId} @ ${inventory_quantity}`);
-    return res.status(200).send("Duplicate ignored");
-  }
-
   const previousQuantity = lastUpdatedStock.get(shopifyProductId);
+
   if (previousQuantity === inventory_quantity) {
-    console.log(`⚠️ Ignored repeat quantity for Product ID ${shopifyProductId}, quantity: ${inventory_quantity}`);
+    console.log(`⚠️ Ignored duplicate update for Product ID ${shopifyProductId}, quantity: ${inventory_quantity}`);
     return res.status(200).send("Duplicate stock update ignored");
   }
 
+  // Update cache and proceed
   lastUpdatedStock.set(shopifyProductId, inventory_quantity);
+
   console.log(`🛒 Shopify Product ID: ${shopifyProductId}, New Stock: ${inventory_quantity}`);
 
   await updateWooCommerceInventory(shopifyProductId, inventory_quantity);
@@ -311,9 +285,9 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
   res.status(200).send("OK");
 });
 
-// ───────────────────────────────────────────────
-// 1️⃣ Load WooCommerce→Shopify mapping into memory
-// ───────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────
+// 1️⃣ Preload WooCommerce→Shopify mapping into memory
+// ──────────────────────────────────────────────────────────────────
 const wooProductMap = new Map();  // shopify_product_id → { id, stock }
 
 async function loadWooMap() {
@@ -369,5 +343,3 @@ loadWooMap()
     console.error("❌ Failed to load WooCommerce product map:", err.message);
     process.exit(1);
   });
-
-  
