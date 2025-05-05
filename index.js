@@ -226,20 +226,40 @@ const handleWooOrder = require("./woo-to-shopify");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(bodyParser.json());
+// app.use(bodyParser.json());
+
+app.use(
+  bodyParser.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
 
 // 🧠 In-memory caches
 const lastUpdatedStock = new Map(); // shopifyProductId → stock
 const webhookCache = new Map();     // productId-stock → timestamp
 
 // ✅ Verify Shopify Webhook Signature
+// function verifyShopifyWebhook(req) {
+//   const hmacHeader = req.get("X-Shopify-Hmac-SHA256");
+//   const body = JSON.stringify(req.body);
+//   const digest = crypto
+//     .createHmac("sha256", process.env.SHOPIFY_WEBHOOK_SECRET)
+//     .update(body, "utf8")
+//     .digest("base64");
+//   return digest === hmacHeader;
+// }
+
 function verifyShopifyWebhook(req) {
   const hmacHeader = req.get("X-Shopify-Hmac-SHA256");
-  const body = JSON.stringify(req.body);
+  const body = req.rawBody; // <--- use raw body buffer
   const digest = crypto
     .createHmac("sha256", process.env.SHOPIFY_WEBHOOK_SECRET)
     .update(body, "utf8")
     .digest("base64");
+
   return digest === hmacHeader;
 }
 
