@@ -215,11 +215,11 @@
 
 
 /// -----------------------------------------------------------------------------------
-
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
+const crypto = require("crypto");
 const { updateWooCommerceInventory } = require("./woocommerce-api");
 const handleWooOrder = require("./woo-to-shopify");
 
@@ -228,11 +228,37 @@ const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// 🧠 In-memory cache to track last updated stock with timestamp
-const lastUpdatedStock = new Map(); // shopifyProductId → { quantity, timestamp }
+// 🧠 In-memory caches
+const lastUpdatedStock = new Map(); // shopifyProductId → stock
+const webhookCache = new Map();     // productId-stock → timestamp
+
+// ✅ Verify Shopify Webhook Signature
+function verifyShopifyWebhook(req) {
+  const hmacHeader = req.get("X-Shopify-Hmac-SHA256");
+  const body = JSON.stringify(req.body);
+  const digest = crypto
+    .createHmac("sha256", process.env.SHOPIFY_WEBHOOK_SECRET)
+    .update(body, "utf8")
+    .digest("base64");
+  return digest === hmacHeader;
+}
+
+// ⏱️ Debounce duplicate updates (within 5s)
+function isDuplicateWebhook(shopifyProductId, inventory_quantity, timestamp) {
+  const key = `${shopifyProductId}-${inventory_quantity}`;
+  const last = webhookCache.get(key);
+  if (last && timestamp - last < 5000) return true;
+  webhookCache.set(key, timestamp);
+  return false;
+}
 
 // 🔥 Shopify Product Update Webhook Handler
 app.post("/shopify/product-update-webhook", async (req, res) => {
+  if (!verifyShopifyWebhook(req)) {
+    console.warn("⚠️ Invalid webhook signature – ignored");
+    return res.status(401).send("Invalid signature");
+  }
+
   const { id: shopifyProductId, variants } = req.body;
 
   if (!shopifyProductId || !Array.isArray(variants) || variants.length === 0) {
@@ -240,30 +266,24 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
   }
 
   const { inventory_quantity } = variants[0];
+
   if (inventory_quantity == null) {
     return res.status(400).send("Missing inventory quantity");
   }
 
   const now = Date.now();
-  const previous = lastUpdatedStock.get(shopifyProductId);
+  if (isDuplicateWebhook(shopifyProductId, inventory_quantity, now)) {
+    console.log(`⏱️ Skipping duplicate webhook for ${shopifyProductId} @ ${inventory_quantity}`);
+    return res.status(200).send("Duplicate ignored");
+  }
 
-  if (
-    previous &&
-    previous.quantity === inventory_quantity &&
-    now - previous.timestamp < 5000 // 5 seconds debounce
-  ) {
-    console.log(
-      `⚠️ Ignored recent duplicate update for Product ID ${shopifyProductId}, quantity: ${inventory_quantity}`
-    );
+  const previousQuantity = lastUpdatedStock.get(shopifyProductId);
+  if (previousQuantity === inventory_quantity) {
+    console.log(`⚠️ Ignored repeat quantity for Product ID ${shopifyProductId}, quantity: ${inventory_quantity}`);
     return res.status(200).send("Duplicate stock update ignored");
   }
 
-  // Update cache and proceed
-  lastUpdatedStock.set(shopifyProductId, {
-    quantity: inventory_quantity,
-    timestamp: now,
-  });
-
+  lastUpdatedStock.set(shopifyProductId, inventory_quantity);
   console.log(`🛒 Shopify Product ID: ${shopifyProductId}, New Stock: ${inventory_quantity}`);
 
   await updateWooCommerceInventory(shopifyProductId, inventory_quantity);
@@ -271,10 +291,10 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
   res.status(200).send("OK");
 });
 
-// ──────────────────────────────────────────────────────────────────
-// 1️⃣ Preload WooCommerce→Shopify mapping into memory
-// ──────────────────────────────────────────────────────────────────
-const wooProductMap = new Map(); // shopify_product_id → { id, stock }
+// ───────────────────────────────────────────────
+// 1️⃣ Load WooCommerce→Shopify mapping into memory
+// ───────────────────────────────────────────────
+const wooProductMap = new Map();  // shopify_product_id → { id, stock }
 
 async function loadWooMap() {
   let page = 1;
@@ -287,8 +307,8 @@ async function loadWooMap() {
           consumer_secret: process.env.WOOCOMMERCE_CONSUMER_SECRET,
           per_page: 100,
           page,
-          context: "edit",
-        },
+          context: "edit"
+        }
       }
     );
 
@@ -296,11 +316,11 @@ async function loadWooMap() {
 
     for (const prod of products) {
       if (!Array.isArray(prod.meta_data)) continue;
-      const entry = prod.meta_data.find((m) => m.key === "shopify_product_id");
+      const entry = prod.meta_data.find(m => m.key === "shopify_product_id");
       if (entry) {
         wooProductMap.set(String(entry.value), {
           id: prod.id,
-          stock: parseInt(prod.stock_quantity, 10) || 0,
+          stock: parseInt(prod.stock_quantity, 10) || 0
         });
       }
     }
@@ -325,8 +345,7 @@ loadWooMap()
       console.log(`🚀 Server running on port ${PORT}`);
     });
   })
-  .catch((err) => {
+  .catch(err => {
     console.error("❌ Failed to load WooCommerce product map:", err.message);
     process.exit(1);
   });
-
