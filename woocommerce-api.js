@@ -172,7 +172,7 @@
 ///-------------------------------------------------------------------------------------------------------------------------------------------------
 
 // woocommerce-api.js
-// Wrapper around @woocommerce/woocommerce-rest-api for updating Woo stock
+// Wrapper around @woocommerce/woocommerce-rest-api for updating WooCommerce stock
 const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
 require("dotenv").config();
 
@@ -185,20 +185,16 @@ const api = new WooCommerceRestApi({
 
 async function updateWooCommerceInventory(shopifyProductId, quantity) {
   try {
-    // Fetch all products once (or you could preload into a map)
+    // Fetch all products
     const all = [];
-    let page = 1;
-    while (true) {
+    for (let page = 1;; page++) {
       const { data } = await api.get("products", { per_page: 100, page });
       all.push(...data);
       if (data.length < 100) break;
-      page++;
     }
 
     const match = all.find(p =>
-      p.meta_data?.some(
-        m => m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId)
-      )
+      p.meta_data?.some(m => m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId))
     );
 
     if (!match) {

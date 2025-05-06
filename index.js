@@ -214,47 +214,55 @@
 
 
 /// ---------------------------------------Above is getting 2 webhook calls--------------------------------------------------------------------------
+
+
 // index.js
-// Main server: handles Shopify product-update webhook
+// Main server: handles Shopify product-update and WooCommerce order webhooks
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 const { lastUpdatedStock } = require("./sync-cache");
-const { handleShopifyInventoryWebhook } = require("./woo-to-shopify");
+const { updateWooCommerceInventory } = require("./woocommerce-api");
+const handleWooOrder = require("./woo-to-shopify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 app.use(bodyParser.json());
 
+// Shopify → WooCommerce sync
 app.post("/shopify/product-update-webhook", async (req, res) => {
   const { id: shopifyProductId, variants } = req.body;
   if (!shopifyProductId || !Array.isArray(variants) || variants.length === 0) {
-    return res.status(400).send("Invalid product payload");
+    return res.status(400).send("Invalid Shopify product payload");
   }
 
   const newQty = variants[0].inventory_quantity;
-  if (newQty == null) {
-    return res.status(400).send("Missing inventory quantity");
-  }
+  if (newQty == null) return res.status(400).send("Missing inventory quantity");
 
-  // Loop detection: if this update came from our own sync, skip it
+  // Skip our own updates
   if (lastUpdatedStock.get(shopifyProductId) === newQty) {
-    console.log(`🔁 Skipping looped update for Product ID ${shopifyProductId}, quantity: ${newQty}`);
+    console.log(`🔁 Skipping looped update for Product ${shopifyProductId}, Qty ${newQty}`);
     return res.status(200).send("Loop skip");
   }
 
-  // Record this update and forward to WooCommerce
+  // Record and push to WooCommerce
   lastUpdatedStock.set(shopifyProductId, newQty);
-  console.log(`🛒 Shopify Product ID: ${shopifyProductId}, New Stock: ${newQty}`);
+  console.log(`🛒 Shopify → Woo: Product ${shopifyProductId}, New Stock ${newQty}`);
 
   try {
-    await handleShopifyInventoryWebhook(shopifyProductId, newQty);
+    await updateWooCommerceInventory(shopifyProductId, newQty);
   } catch (err) {
-    console.error("❌ Woo update failed:", err.message);
+    console.error("❌ WooCommerce update failed:", err.message);
   }
 
   res.status(200).send("OK");
+});
+
+// WooCommerce → Shopify order sync
+app.post("/woo-order-webhook", (req, res) => {
+  console.log("🚚 WooCommerce order webhook received");
+  res.sendStatus(200);
+  handleWooOrder(req.body);
 });
 
 app.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
