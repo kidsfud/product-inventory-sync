@@ -94,6 +94,20 @@
 require("dotenv").config();
 const axios = require("axios");
 
+// woocommerce-api.js
+const required = [
+  "WOOCOMMERCE_SITE_URL",
+  "WOOCOMMERCE_CONSUMER_KEY",
+  "WOOCOMMERCE_CONSUMER_SECRET"
+];
+for (const envVar of required) {
+  if (!process.env[envVar]) {
+    console.error(`❌ Missing environment variable: ${envVar}`);
+    process.exit(1);
+  }
+}
+
+
 const {
   WOOCOMMERCE_SITE_URL,
   WOOCOMMERCE_CONSUMER_KEY,
