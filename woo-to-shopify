@@ -70,47 +70,18 @@
 
 
 /// -------------------------------------------------------------------------------------------------------------------------
-
-// woo-to-shopify.js
 require("dotenv").config();
 const axios = require("axios");
 const { updateWooInventoryByVariant } = require("./woocommerce-api");
 
 const {
   SHOPIFY_ACCESS_TOKEN,
-  SHOPIFY_STORE_URL,
-  SHOPIFY_LOCATION_ID
+  SHOPIFY_STORE_URL
 } = process.env;
 
-module.exports = async function handleWooOrderWebhook(order) {
-  if (!order?.line_items) {
-    console.warn("❌ Invalid Woo order payload");
-    return;
-  }
-
-  for (const item of order.line_items) {
-    // ❓ If you still match on product-level, you can do that here.
-    // But for per‐variant updates, we’re going to sync via the inventory webhook instead.
-  }
-};
-
-// ──────────────────────────────────────────────────────────────────────
-// Instead, for Shopify→Woo sync (variant‐based), export this handler:
-// ──────────────────────────────────────────────────────────────────────
-
-module.exports = async function handleShopifyInventoryWebhook(inventory_item_id, available) {
-  // We need to translate inventory_item_id → shopify_variant_id
-  // But Shopify’s “inventory levels update” webhook payload gives you the inventory_item_id only.
-  // If you prefer per‐variant, you can instead subscribe to the Product webhook,
-  // fetch variants, find the variant whose inventory_item_id matches, then call below.
-
-  // For now, assume your Woo field stores the Shopify VARIANT ID,
-  // so you’ll need an extra step: fetch variants by scanning all products
-  // and find the variant whose inventory_item_id === inventory_item_id.
-  // Then call updateWooInventoryByVariant(variantId, available).
-
-  // 1️⃣ Fetch all variants of all products (paginated if needed)
+async function handleShopifyInventoryWebhook(inventory_item_id, available) {
   const variantSearchUrl = `https://${SHOPIFY_STORE_URL}/admin/api/2024-01/variants.json`;
+
   const { data } = await axios.get(variantSearchUrl, {
     headers: { "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN },
     params: { inventory_item_ids: inventory_item_id }
@@ -125,6 +96,7 @@ module.exports = async function handleShopifyInventoryWebhook(inventory_item_id,
   const shopifyVariantId = variants[0].id;
   console.log(`🔄 Shopify variant ${shopifyVariantId} now has ${available} in stock`);
 
-  // 2️⃣ Delegate to Woo updater
   await updateWooInventoryByVariant(shopifyVariantId, available);
-};
+}
+
+module.exports = { handleShopifyInventoryWebhook };

@@ -170,84 +170,45 @@
 
 
 ///-------------------------------------------------------------------------------------------------------------------------------------------------
-
-
-// woocommerce-api.js
 require("dotenv").config();
 const axios = require("axios");
 
-// 1️⃣ Fail fast if any env var is missing
-["WOOCOMMERCE_SITE_URL","WOOCOMMERCE_CONSUMER_KEY","WOOCOMMERCE_CONSUMER_SECRET"]
-  .forEach(key => {
-    if (!process.env[key]) {
-      console.error(`❌ Missing environment variable: ${key}`);
-      process.exit(1);
-    }
-  });
+const WOO_URL = process.env.WOO_URL;
+const WOO_KEY = process.env.WOO_KEY;
+const WOO_SECRET = process.env.WOO_SECRET;
 
-const {
-  WOOCOMMERCE_SITE_URL,
-  WOOCOMMERCE_CONSUMER_KEY,
-  WOOCOMMERCE_CONSUMER_SECRET
-} = process.env;
-
-// 2️⃣ Create an axios client for the WooCommerce REST API
-const woo = axios.create({
-  baseURL: `${WOOCOMMERCE_SITE_URL}/wp-json/wc/v3/`,
-  auth: {
-    username: WOOCOMMERCE_CONSUMER_KEY,
-    password: WOOCOMMERCE_CONSUMER_SECRET
-  },
-  headers: { "Content-Type": "application/json" },
-});
-
-async function updateWooInventoryByVariant(variantId, newQty) {
+async function updateWooInventoryByVariant(shopifyVariantId, available) {
   try {
-    console.log(`🔧 Woo baseURL: ${woo.defaults.baseURL}`);
-    console.log(`🔎 Fetching products to locate variant ${variantId}...`);
-
-    // 3️⃣ Fetch first page of products
-    const { data: products } = await woo.get("products", {
-      params: { per_page: 100, page: 1, context: "edit", _fields: "id,variations" }
+    // Adjust endpoint logic as needed — assuming you're storing `shopify_variant_id` in product metadata.
+    const { data: products } = await axios.get(`https://${WOO_URL}/wp-json/wc/v3/products`, {
+      auth: { username: WOO_KEY, password: WOO_SECRET }
     });
 
-    let match = null;
-    for (const prod of products) {
-      if (!Array.isArray(prod.variations)) continue;
-      for (const varId of prod.variations) {
-        console.log(`  🔍 Checking variation ${varId} of product ${prod.id}`);
-        const { data: variation } = await woo.get(
-          `products/${prod.id}/variations/${varId}`,
-          { params: { context: "edit" } }
-        );
+    for (const product of products) {
+      const metadata = product.meta_data || [];
+      const match = metadata.find(
+        (meta) => meta.key === "shopify_product_id" && meta.value == shopifyVariantId
+      );
 
-        const shopifyMeta = variation.meta_data.find(m => m.key === "shopify_variant_id");
-        if (shopifyMeta && String(shopifyMeta.value).trim() === String(variantId)) {
-          match = { product_id: prod.id, variation_id: variation.id };
-          break;
-        }
+      if (match) {
+        const productId = product.id;
+
+        // update the stock quantity
+        await axios.put(`https://${WOO_URL}/wp-json/wc/v3/products/${productId}`, {
+          stock_quantity: available
+        }, {
+          auth: { username: WOO_KEY, password: WOO_SECRET }
+        });
+
+        console.log(`✅ Updated WooCommerce stock for product ${productId}`);
+        return;
       }
-      if (match) break;
     }
 
-    if (!match) {
-      console.warn(`⚠️ No Woo variation matched shopify_variant_id=${variantId}`);
-      return;
-    }
-
-    console.log(`🛠 Found match: product ${match.product_id}, variation ${match.variation_id}`);
-    console.log(`➡️ Updating stock_quantity to ${newQty}`);
-
-    // 4️⃣ Send the update
-    const updateUrl = `products/${match.product_id}/variations/${match.variation_id}`;
-    console.log(`📤 PUT ${woo.defaults.baseURL}${updateUrl}`);
-    await woo.put(updateUrl, { stock_quantity: newQty });
-
-    console.log(`✅ Woo variation ${match.variation_id} stock set to ${newQty}`);
+    console.warn(`⚠️ No WooCommerce product matched Shopify variant ID ${shopifyVariantId}`);
   } catch (err) {
-    // 5️⃣ Detailed error logging
-    const url = err.config ? `${err.config.baseURL}${err.config.url}` : "<unknown>";
-    console.error("❌ Woo update failed:", url, err.message);
+    console.error("❌ Failed to update WooCommerce:", err.message);
+    throw err;
   }
 }
 

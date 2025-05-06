@@ -215,18 +215,15 @@
 
 /// ---------------------------------------Above is getting 2 webhook calls--------------------------------------------------------------------------
 
-
-
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
-const axios = require("axios");
-const handleWooInventoryUpdate = require("./woo-to-shopify");
+const { handleShopifyInventoryWebhook } = require("./woo-to-shopify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// in-memory cache: variant_id → last known qty
+// In-memory cache: variant_id → last known qty
 const lastUpdatedQty = new Map();
 
 app.use(bodyParser.json());
@@ -240,17 +237,16 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
 
   for (const v of variants) {
     const variantId = v.id;
-    const newQty    = v.inventory_quantity;
+    const newQty = v.inventory_quantity;
 
-    // skip duplicates
+    // Skip duplicates
     if (lastUpdatedQty.get(variantId) === newQty) continue;
     lastUpdatedQty.set(variantId, newQty);
 
     console.log(`🔄 Variant ${variantId} new inventory: ${newQty}`);
 
-    // hand off to your Woo sync logic
     try {
-      await handleWooInventoryUpdate(variantId, newQty);
+      await handleShopifyInventoryWebhook(variantId, newQty);
     } catch (err) {
       console.error("❌ Woo update failed:", err.message);
     }
@@ -258,8 +254,5 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
 
   res.status(200).send("OK");
 });
-
-// ─── (Optional) Woo → Shopify order route stays the same ──────
-// app.post("/woo-order-webhook", ...)
 
 app.listen(PORT, () => console.log(`🚀 Listening on ${PORT}`));
