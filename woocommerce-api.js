@@ -173,7 +173,7 @@
 require("dotenv").config();
 const axios = require("axios");
 
-const WOO_URL = process.env.WOO_URL;
+const WOO_URL = process.env.WOOCOMMERCE_SITE_URL;
 const WOO_KEY = process.env.WOO_KEY;
 const WOO_SECRET = process.env.WOO_SECRET;
 
