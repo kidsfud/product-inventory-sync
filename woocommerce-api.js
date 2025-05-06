@@ -170,60 +170,51 @@
 
 
 ///-------------------------------------------------------------------------------------------------------------------------------------------------
+
+// woocommerce-api.js
+// Wrapper around @woocommerce/woocommerce-rest-api for updating Woo stock
+const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
 require("dotenv").config();
-const axios = require("axios");
 
-// Read your WooCommerce creds & site URL
-const WOO_BASE = (process.env.WOOCOMMERCE_SITE_URL || "")
-  // strip any trailing slash
-  .replace(/\/$/, "");
-const WOO_KEY = process.env.WOOCOMMERCE_CONSUMER_KEY;
-const WOO_SECRET = process.env.WOOCOMMERCE_CONSUMER_SECRET;
+const api = new WooCommerceRestApi({
+  url: process.env.WOOCOMMERCE_SITE_URL,
+  consumerKey: process.env.WOOCOMMERCE_CONSUMER_KEY,
+  consumerSecret: process.env.WOOCOMMERCE_CONSUMER_SECRET,
+  version: "wc/v3"
+});
 
-// Debug‐log on startup
-console.log("🔍 WooCommerce base URL:", WOO_BASE || "(missing)");
-console.log("🔍 Consumer Key present?", !!WOO_KEY);
-console.log("🔍 Consumer Secret present?", !!WOO_SECRET);
-
-if (!WOO_BASE || !WOO_KEY || !WOO_SECRET) {
-  console.error("❌ Missing one of WOOCOMMERCE_SITE_URL, WOOCOMMERCE_CONSUMER_KEY, WOOCOMMERCE_CONSUMER_SECRET");
-  process.exit(1);
-}
-
-/**
- * Fetches all products, finds the one whose `meta_data`
- * includes a key "shopify_product_id" matching the Shopify variant ID,
- * and updates its stock_quantity.
- */
-async function updateWooInventoryByVariant(shopifyVariantId, available) {
+async function updateWooCommerceInventory(shopifyProductId, quantity) {
   try {
-    // 1️⃣ Fetch all products
-    const resp = await axios.get(
-      `${WOO_BASE}/wp-json/wc/v3/products`,
-      { auth: { username: WOO_KEY, password: WOO_SECRET } }
-    );
-    const products = resp.data;
-
-    // 2️⃣ Find matching product
-    for (const product of products) {
-      const metadata = product.meta_data || [];
-      if (metadata.some(m => m.key === "shopify_product_id" && m.value == shopifyVariantId)) {
-        // 3️⃣ Update its stock
-        await axios.put(
-          `${WOO_BASE}/wp-json/wc/v3/products/${product.id}`,
-          { stock_quantity: available },
-          { auth: { username: WOO_KEY, password: WOO_SECRET } }
-        );
-        console.log(`✅ Woo stock updated for product ${product.id}`);
-        return;
-      }
+    // Fetch all products once (or you could preload into a map)
+    const all = [];
+    let page = 1;
+    while (true) {
+      const { data } = await api.get("products", { per_page: 100, page });
+      all.push(...data);
+      if (data.length < 100) break;
+      page++;
     }
 
-    console.warn(`⚠️ No Woo product matched Shopify variant ${shopifyVariantId}`);
+    const match = all.find(p =>
+      p.meta_data?.some(
+        m => m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId)
+      )
+    );
+
+    if (!match) {
+      console.warn(`⚠️ No Woo product with shopify_product_id=${shopifyProductId}`);
+      return;
+    }
+
+    await api.put(`products/${match.id}`, {
+      stock_quantity: quantity,
+      manage_stock: true
+    });
+
+    console.log(`✅ Woo stock updated for product ${match.id} → ${quantity}`);
   } catch (err) {
-    console.error("❌ Failed to update WooCommerce:", err.message);
-    throw err;
+    console.error("❌ WooCommerce update failed:", err.response?.data || err.message);
   }
 }
 
-module.exports = { updateWooInventoryByVariant };
+module.exports = { updateWooCommerceInventory };

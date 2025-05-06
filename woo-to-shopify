@@ -70,35 +70,67 @@
 
 
 /// -------------------------------------------------------------------------------------------------------------------------
+
+// woo-to-shopify.js
+// Handles WooCommerce → Shopify order hooks and pushes inventory adjustments
 require("dotenv").config();
 const axios = require("axios");
-const { updateWooInventoryByVariant } = require("./woocommerce-api");
+const { lastUpdatedStock } = require("./sync-cache");
 
-const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN;
-const SHOPIFY_STORE = process.env.SHOPIFY_STORE_DOMAIN;
-
-if (!SHOPIFY_TOKEN || !SHOPIFY_STORE) {
-  console.error("❌ Missing Shopify env vars! Please set SHOPIFY_ADMIN_API_ACCESS_TOKEN and SHOPIFY_STORE_DOMAIN");
-  process.exit(1);
-}
-
-async function handleShopifyInventoryWebhook(inventory_item_id, available) {
-  const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/variants.json`;
-  const { data } = await axios.get(url, {
-    headers: { "X-Shopify-Access-Token": SHOPIFY_TOKEN },
-    params: { inventory_item_ids: inventory_item_id }
-  });
-
-  const variants = data.variants || [];
-  if (!variants.length) {
-    console.error("❌ No Shopify variant found for inventory_item_id", inventory_item_id);
+module.exports = async function handleWooOrder(order, wooProductMap) {
+  if (!order || !order.id || !Array.isArray(order.line_items)) {
+    console.error("❌ Invalid Woo order payload");
     return;
   }
 
-  const shopifyVariantId = variants[0].id;
-  console.log(`🔄 Shopify variant ${shopifyVariantId} mapped → stock ${available}`);
+  for (const item of order.line_items) {
+    const quantity = item.quantity;
+    const meta = item.meta_data || [];
+    const shopifyMeta = meta.find(m => m.key === "shopify_product_id");
+    const shopifyProductId = shopifyMeta ? String(shopifyMeta.value) : null;
 
-  await updateWooInventoryByVariant(shopifyVariantId, available);
-}
+    if (!shopifyProductId) {
+      console.warn(`⚠️ No Shopify Product ID for Woo item ${item.name}`);
+      continue;
+    }
 
-module.exports = { handleShopifyInventoryWebhook };
+    try {
+      // Fetch first variant to get inventory_item_id
+      const variantsRes = await axios.get(
+        `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/products/${shopifyProductId}/variants.json`,
+        { headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN } }
+      );
+      const variants = variantsRes.data.variants;
+      if (!variants || variants.length === 0) {
+        console.error(`❌ No Shopify variants for product ${shopifyProductId}`);
+        continue;
+      }
+      const inventoryItemId = variants[0].inventory_item_id;
+      console.log(`➡️ Found Shopify inventory_item_id ${inventoryItemId} for product ${shopifyProductId}`);
+
+      // Pre-seed cache to prevent loop: expected new quantity = old - order quantity
+      // (You might fetch current available beforehand if needed)
+      const expectedNewQty = (variants[0].inventory_quantity || 0) - quantity;
+      lastUpdatedStock.set(shopifyProductId, expectedNewQty);
+
+      // Adjust inventory in Shopify
+      const adjustUrl = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/inventory_levels/adjust.json`;
+      await axios.post(
+        adjustUrl,
+        {
+          location_id: process.env.SHOPIFY_LOCATION_ID,
+          inventory_item_id: inventoryItemId,
+          available_adjustment: -quantity
+        },
+        { headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN } }
+      );
+
+      console.log(`✅ Adjusted Shopify stock for ${shopifyProductId} by -${quantity}`);
+    } catch (err) {
+      console.error("❌ Error syncing to Shopify:", err.response?.data || err.message);
+    }
+  }
+
+  console.log(`✅ WooCommerce Order Processed: ${order.id}`);
+};
+
