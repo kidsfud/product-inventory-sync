@@ -214,7 +214,6 @@
 
 
 /// ---------------------------------------Above is getting 2 webhook calls--------------------------------------------------------------------------
-
 require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -223,12 +222,11 @@ const { handleShopifyInventoryWebhook } = require("./woo-to-shopify");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// In-memory cache: variant_id → last known qty
+// In‐memory cache to dedupe identical inventory updates
 const lastUpdatedQty = new Map();
 
 app.use(bodyParser.json());
 
-// ─── Shopify Product Update Webhook (variant-aware) ───────────
 app.post("/shopify/product-update-webhook", async (req, res) => {
   const variants = req.body.variants;
   if (!Array.isArray(variants)) {
@@ -237,9 +235,8 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
 
   for (const v of variants) {
     const variantId = v.id;
-    const newQty = v.inventory_quantity;
+    const newQty    = v.inventory_quantity;
 
-    // Skip duplicates
     if (lastUpdatedQty.get(variantId) === newQty) continue;
     lastUpdatedQty.set(variantId, newQty);
 
