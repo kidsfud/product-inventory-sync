@@ -98,6 +98,7 @@ const axios = require("axios");
 // woocommerce-api.js
 ["WOOCOMMERCE_SITE_URL","WOOCOMMERCE_CONSUMER_KEY","WOOCOMMERCE_CONSUMER_SECRET"]
   .forEach(key => {
+    console.log(`env ${key} =`, process.env[key]);
     if (!process.env[key]) {
       console.error(`❌ Missing environment variable: ${key}`);
       process.exit(1);
