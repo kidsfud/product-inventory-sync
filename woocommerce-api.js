@@ -174,9 +174,8 @@ require("dotenv").config();
 const axios = require("axios");
 
 const WOO_URL = process.env.WOOCOMMERCE_SITE_URL;
-const WOO_KEY = process.env.WOO_KEY;
-const WOO_SECRET = process.env.WOO_SECRET;
-
+const WOO_KEY = process.env.WOOCOMMERCE_CONSUMER_KEY;
+const WOO_SECRET = process.env.WOOCOMMERCE_CONSUMER_SECRET;
 async function updateWooInventoryByVariant(shopifyVariantId, available) {
   try {
     // Adjust endpoint logic as needed — assuming you're storing `shopify_variant_id` in product metadata.
