@@ -252,4 +252,3 @@ async function updateWooInventoryByVariant(variantId, newQty) {
 }
 
 module.exports = { updateWooInventoryByVariant };
-
