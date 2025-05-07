@@ -71,14 +71,81 @@
 
 /// -------------------------------------------------------------------------------------------------------------------------
 
+// // woo-to-shopify.js
+// // Handles WooCommerce → Shopify order webhooks by adjusting Shopify inventory
+// require("dotenv").config();
+// const axios = require("axios");
+// const { lastUpdatedStock } = require("./sync-cache");
+
+// module.exports = async function handleWooOrder(order) {
+//   if (!order || !order.id || !Array.isArray(order.line_items)) {
+//     console.error("❌ Invalid Woo order payload");
+//     return;
+//   }
+
+//   for (const item of order.line_items) {
+//     const qty = item.quantity;
+//     const meta = item.meta_data || [];
+//     const shopifyMeta = meta.find(m => m.key === "shopify_product_id");
+//     const productId = shopifyMeta ? String(shopifyMeta.value) : null;
+//     if (!productId) {
+//       console.warn(`⚠️ No Shopify ID for Woo item ${item.name}`);
+//       continue;
+//     }
+
+//     try {
+//       // Get variant to find inventory_item_id
+//       const varRes = await axios.get(
+//         `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/products/${productId}/variants.json`,
+//         { headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN } }
+//       );
+//       const variant = varRes.data.variants?.[0];
+//       if (!variant) {
+//         console.error(`❌ No Shopify variant for product ${productId}`);
+//         continue;
+//       }
+
+//       const invItemId = variant.inventory_item_id;
+//       const currentQty = variant.inventory_quantity || 0;
+//       const expectedQty = currentQty - qty;
+//       lastUpdatedStock.set(productId, expectedQty);
+
+//       // Adjust inventory
+//       await axios.post(
+//         `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/inventory_levels/adjust.json`,
+//         {
+//           location_id: process.env.SHOPIFY_LOCATION_ID,
+//           inventory_item_id: invItemId,
+//           available_adjustment: -qty
+//         },
+//         { headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN } }
+//       );
+
+//       console.log(`✅ Shopify stock adjusted for ${productId} by -${qty}`);
+//     } catch (err) {
+//       console.error("❌ Error syncing to Shopify:", err.response?.data || err.message);
+//     }
+//   }
+
+//   console.log(`✅ Processed Woo Order ${order.id}`);
+// };
+
+//-----------------ABOVE CODE IS WORKING FOR MANUAL UPATE -----------------------
+
+
 // woo-to-shopify.js
-// Handles WooCommerce → Shopify order webhooks by adjusting Shopify inventory
+// Exports two handlers: orders→Shopify and inventory-levels→WooCommerce
+
 require("dotenv").config();
 const axios = require("axios");
+const { updateWooCommerceInventory } = require("./woocommerce-api");
 const { lastUpdatedStock } = require("./sync-cache");
 
-module.exports = async function handleWooOrder(order) {
-  if (!order || !order.id || !Array.isArray(order.line_items)) {
+/**
+ * 1️⃣ WooCommerce order → Shopify inventory adjust
+ */
+module.exports.handleWooOrder = async function(order) {
+  if (!order?.id || !Array.isArray(order.line_items)) {
     console.error("❌ Invalid Woo order payload");
     return;
   }
@@ -87,30 +154,31 @@ module.exports = async function handleWooOrder(order) {
     const qty = item.quantity;
     const meta = item.meta_data || [];
     const shopifyMeta = meta.find(m => m.key === "shopify_product_id");
-    const productId = shopifyMeta ? String(shopifyMeta.value) : null;
+    const productId = shopifyMeta?.value && String(shopifyMeta.value);
     if (!productId) {
       console.warn(`⚠️ No Shopify ID for Woo item ${item.name}`);
       continue;
     }
 
     try {
-      // Get variant to find inventory_item_id
-      const varRes = await axios.get(
+      // fetch variant → inventory_item_id + current qty
+      const { data } = await axios.get(
         `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/products/${productId}/variants.json`,
         { headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN } }
       );
-      const variant = varRes.data.variants?.[0];
+      const variant = data.variants?.[0];
       if (!variant) {
         console.error(`❌ No Shopify variant for product ${productId}`);
         continue;
       }
 
       const invItemId = variant.inventory_item_id;
-      const currentQty = variant.inventory_quantity || 0;
-      const expectedQty = currentQty - qty;
-      lastUpdatedStock.set(productId, expectedQty);
+      const curr = variant.inventory_quantity ?? 0;
+      const expected = curr - qty;
+      // pre-seed cache so our own adjust doesn’t loop back
+      lastUpdatedStock.set(productId, expected);
 
-      // Adjust inventory
+      // call inventory_levels/adjust
       await axios.post(
         `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/inventory_levels/adjust.json`,
         {
@@ -121,12 +189,39 @@ module.exports = async function handleWooOrder(order) {
         { headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN } }
       );
 
-      console.log(`✅ Shopify stock adjusted for ${productId} by -${qty}`);
+      console.log(`✅ Shopify stock adjusted (${productId}) by -${qty}`);
     } catch (err) {
       console.error("❌ Error syncing to Shopify:", err.response?.data || err.message);
     }
   }
 
-  console.log(`✅ Processed Woo Order ${order.id}`);
+  console.log(`✅ Woo order processed: ${order.id}`);
 };
 
+/**
+ * 2️⃣ Inventory Level webhook → WooCommerce stock update
+ */
+module.exports.handleShopifyInventoryWebhook = async function(inventory_item_id, available) {
+  try {
+    // find variant → get variant ID
+    const url = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/variants.json`;
+    const { data } = await axios.get(url, {
+      headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN },
+      params: { inventory_item_ids: inventory_item_id }
+    });
+
+    const variant = data.variants?.[0];
+    if (!variant) {
+      console.error("❌ No Shopify variant for inventory_item_id", inventory_item_id);
+      return;
+    }
+
+    const variantId = variant.id;
+    console.log(`🔄 Shopify variant ${variantId} → available ${available}`);
+
+    // forward to WooCommerce
+    await updateWooCommerceInventory(variantId, available);
+  } catch (err) {
+    console.error("❌ Failed to handle inventory-level webhook:", err.message);
+  }
+};

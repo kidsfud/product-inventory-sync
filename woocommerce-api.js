@@ -171,8 +171,58 @@
 
 ///-------------------------------------------------------------------------------------------------------------------------------------------------
 
+// // woocommerce-api.js
+// // Wrapper around @woocommerce/woocommerce-rest-api for updating WooCommerce stock
+// const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
+// require("dotenv").config();
+
+// const api = new WooCommerceRestApi({
+//   url: process.env.WOOCOMMERCE_SITE_URL,
+//   consumerKey: process.env.WOOCOMMERCE_CONSUMER_KEY,
+//   consumerSecret: process.env.WOOCOMMERCE_CONSUMER_SECRET,
+//   version: "wc/v3"
+// });
+
+// async function updateWooCommerceInventory(shopifyProductId, quantity) {
+//   try {
+//     // Fetch all products
+//     const all = [];
+//     for (let page = 1;; page++) {
+//       const { data } = await api.get("products", { per_page: 100, page });
+//       all.push(...data);
+//       if (data.length < 100) break;
+//     }
+
+//     const match = all.find(p =>
+//       p.meta_data?.some(m => m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId))
+//     );
+
+//     if (!match) {
+//       console.warn(`⚠️ No Woo product with shopify_product_id=${shopifyProductId}`);
+//       return;
+//     }
+
+//     await api.put(`products/${match.id}`, {
+//       stock_quantity: quantity,
+//       manage_stock: true
+//     });
+
+//     console.log(`✅ Woo stock updated for product ${match.id} → ${quantity}`);
+//   } catch (err) {
+//     console.error("❌ WooCommerce update failed:", err.response?.data || err.message);
+//   }
+// }
+
+// module.exports = { updateWooCommerceInventory };
+
+
+///--------------------------ABOVE CODE IS WORKING FOR MANUAL UPDATE ----------------------------------------
+
+
+
 // woocommerce-api.js
-// Wrapper around @woocommerce/woocommerce-rest-api for updating WooCommerce stock
+// Wraps @woocommerce/woocommerce-rest-api to update Woo stock by Shopify variant ID
+
 const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
 require("dotenv").config();
 
@@ -185,16 +235,19 @@ const api = new WooCommerceRestApi({
 
 async function updateWooCommerceInventory(shopifyProductId, quantity) {
   try {
-    // Fetch all products
+    // paginate through all products (or preload in memory if you prefer)
     const all = [];
-    for (let page = 1;; page++) {
+    for (let page = 1; ; page++) {
       const { data } = await api.get("products", { per_page: 100, page });
       all.push(...data);
       if (data.length < 100) break;
     }
 
+    // find the one with matching meta_data.shopify_product_id
     const match = all.find(p =>
-      p.meta_data?.some(m => m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId))
+      p.meta_data?.some(m =>
+        m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId)
+      )
     );
 
     if (!match) {
