@@ -208,7 +208,7 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
 });
 
 // ─── 2) Order-driven decrements ───────────────────────────────────
-app.post("/shopify/inventory-levels-webhook", async (req, res) => {
+app.post("/shopify/inventory-level-update-webhook", async (req, res) => {
   const lvl = req.body.inventory_level;
   if (!lvl || lvl.available == null) {
     return res.status(400).send("Invalid inventory payload");
