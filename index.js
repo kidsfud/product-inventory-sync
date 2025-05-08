@@ -165,6 +165,78 @@
 
 // // ------------------------------ABOVE IS WORKING FOR MANUAL UPDATE NOT FOR AUTOMATIC ORDER UPDATE-----------------------------------------------------
 
+// // index.js
+// // Main server: handles Shopify product-update, inventory-level, and Woo order webhooks
+
+// require("dotenv").config();
+// const express = require("express");
+// const bodyParser = require("body-parser");
+
+// const { lastUpdatedStock } = require("./sync-cache");
+// const { updateWooCommerceInventory } = require("./woocommerce-api");
+// const { handleWooOrder, handleShopifyInventoryWebhook } = require("./woo-to-shopify");
+
+// const app = express();
+// const PORT = process.env.PORT || 3000;
+// app.use(bodyParser.json());
+
+// // ─── 1) Manual & App-driven edits ────────────────────────────────
+// app.post("/shopify/product-update-webhook", async (req, res) => {
+//   const { id: shopifyProductId, variants } = req.body;
+//   if (!shopifyProductId || !Array.isArray(variants) || !variants.length) {
+//     return res.status(400).send("Invalid Shopify product payload");
+//   }
+//   const newQty = variants[0].inventory_quantity;
+//   if (newQty == null) return res.status(400).send("Missing inventory quantity");
+
+//   // skip our own adjustments
+//   if (lastUpdatedStock.get(shopifyProductId) === newQty) {
+//     console.log(`🔁 Skipping loop update for Product ${shopifyProductId}, Qty ${newQty}`);
+//     return res.status(200).send("Loop skip");
+//   }
+
+//   lastUpdatedStock.set(shopifyProductId, newQty);
+//   console.log(`🛒 [Product] Shopify→Woo: ${shopifyProductId} → ${newQty}`);
+
+//   try {
+//     await updateWooCommerceInventory(shopifyProductId, newQty);
+//   } catch (err) {
+//     console.error("❌ Woo update failed:", err.message);
+//   }
+
+//   res.status(200).send("OK");
+// });
+
+// // ─── 2) Order-driven decrements ───────────────────────────────────
+// app.post("/shopify/inventory-level-update-webhook", async (req, res) => {
+//   console.log("📥 HIT inventory-levels webhook", req.body);
+//   const lvl = req.body.inventory_level;
+//   if (!lvl || lvl.available == null) {
+//     return res.status(400).send("Invalid inventory payload");
+//   }
+
+//   console.log(`⚙️ [InventoryLevel] item ${lvl.inventory_item_id} → available ${lvl.available}`);
+//   try {
+//     await handleShopifyInventoryWebhook(lvl.inventory_item_id, lvl.available);
+//   } catch (err) {
+//     console.error("❌ Woo update failed:", err.message);
+//   }
+//   res.status(200).send("OK");
+// });
+
+// // ─── 3) WooCommerce order hook ───────────────────────────────────
+// app.post("/woo-order-webhook", (req, res) => {
+//   console.log("🚚 Woo order webhook received");
+//   res.sendStatus(200);
+//   handleWooOrder(req.body);
+// });
+
+// app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
+
+
+/// -------------------- CALLING AFTER WOO UPDATE --------------------------------------------
+
+
 // index.js
 // Main server: handles Shopify product-update, inventory-level, and Woo order webhooks
 
@@ -174,7 +246,10 @@ const bodyParser = require("body-parser");
 
 const { lastUpdatedStock } = require("./sync-cache");
 const { updateWooCommerceInventory } = require("./woocommerce-api");
-const { handleWooOrder, handleShopifyInventoryWebhook } = require("./woo-to-shopify");
+const {
+  handleWooOrder,
+  handleShopifyInventoryWebhook
+} = require("./woo-to-shopify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -208,19 +283,27 @@ app.post("/shopify/product-update-webhook", async (req, res) => {
 });
 
 // ─── 2) Order-driven decrements ───────────────────────────────────
+// Make sure this matches the Address you registered in Shopify
 app.post("/shopify/inventory-level-update-webhook", async (req, res) => {
   console.log("📥 HIT inventory-levels webhook", req.body);
+
   const lvl = req.body.inventory_level;
-  if (!lvl || lvl.available == null) {
+  if (!lvl || lvl.available == null || !lvl.updated_at) {
     return res.status(400).send("Invalid inventory payload");
   }
 
-  console.log(`⚙️ [InventoryLevel] item ${lvl.inventory_item_id} → available ${lvl.available}`);
+  console.log(`⚙️ [InventoryLevel] item ${lvl.inventory_item_id} → available ${lvl.available} @${lvl.updated_at}`);
   try {
-    await handleShopifyInventoryWebhook(lvl.inventory_item_id, lvl.available);
+    // Pass inventory_item_id, available, AND updated_at into the handler
+    await handleShopifyInventoryWebhook(
+      lvl.inventory_item_id,
+      lvl.available,
+      lvl.updated_at
+    );
   } catch (err) {
     console.error("❌ Woo update failed:", err.message);
   }
+
   res.status(200).send("OK");
 });
 
@@ -232,5 +315,3 @@ app.post("/woo-order-webhook", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
-
-
