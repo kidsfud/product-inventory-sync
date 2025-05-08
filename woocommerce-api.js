@@ -243,11 +243,21 @@ async function updateWooCommerceInventory(shopifyProductId, quantity) {
       if (data.length < 100) break;
     }
 
-    // find the one with matching meta_data.shopify_product_id
+    // // find the one with matching meta_data.shopify_product_id
+    // const match = all.find(p =>
+    //   p.meta_data?.some(m =>
+    //     m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId)
+    //   )
+    // );
+
     const match = all.find(p =>
-      p.meta_data?.some(m =>
-        m.key === "shopify_product_id" && String(m.value) === String(shopifyProductId)
-      )
+      p.meta_data?.some(m => {
+        if (m.key !== "shopify_product_id") return false;
+        // normalize both sides
+        const val = String(m.value).trim();
+        const id  = String(shopifyProductId).trim();
+        return val === id;
+      })
     );
 
     if (!match) {
