@@ -153,8 +153,14 @@ module.exports.handleWooOrder = async function(order) {
   for (const item of order.line_items) {
     const qty = item.quantity;
     const meta = item.meta_data || [];
+    // const shopifyMeta = meta.find(m => m.key === "shopify_product_id");
+    // const productId = shopifyMeta?.value && String(shopifyMeta.value);
+
     const shopifyMeta = meta.find(m => m.key === "shopify_product_id");
-    const productId = shopifyMeta?.value && String(shopifyMeta.value);
+    const productId   = shopifyMeta
+    ? String(shopifyMeta.value).trim()
+    : null;
+
     if (!productId) {
       console.warn(`⚠️ No Shopify ID for Woo item ${item.name}`);
       continue;
